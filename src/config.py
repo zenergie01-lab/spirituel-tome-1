@@ -23,6 +23,25 @@ load_dotenv(ROOT / ".env")
 SOURCE_MD = ROOT / "tome1_social_table.md"
 
 
+def _get(key: str, default: str | None = None) -> str | None:
+    """Lit une clé de config : variables d'env (.env) d'abord, puis les
+    secrets Streamlit (st.secrets) quand on tourne dans Streamlit Cloud.
+
+    Permet au même code de marcher en local (.env) et en ligne (secrets).
+    """
+    value = os.getenv(key)
+    if value:
+        return value
+    try:
+        import streamlit as st  # import paresseux : pas requis hors Streamlit
+
+        if key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
+
+
 @dataclass(frozen=True)
 class ProviderSpec:
     """Caractéristiques d'un fournisseur d'embeddings."""
@@ -42,13 +61,13 @@ _DIMENSIONS = {
 
 
 def get_provider() -> ProviderSpec:
-    provider = os.getenv("EMBEDDING_PROVIDER", "mistral").strip().lower()
+    provider = (_get("EMBEDDING_PROVIDER", "mistral") or "mistral").strip().lower()
     if provider == "mistral":
-        model = os.getenv("MISTRAL_EMBED_MODEL", "mistral-embed")
+        model = _get("MISTRAL_EMBED_MODEL", "mistral-embed")
     elif provider == "openai":
-        model = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large")
+        model = _get("OPENAI_EMBED_MODEL", "text-embedding-3-large")
     elif provider == "cohere":
-        model = os.getenv("COHERE_EMBED_MODEL", "embed-multilingual-v3.0")
+        model = _get("COHERE_EMBED_MODEL", "embed-multilingual-v3.0")
     else:
         raise ValueError(
             f"EMBEDDING_PROVIDER inconnu : '{provider}'. "
@@ -65,28 +84,29 @@ def get_provider() -> ProviderSpec:
 
 
 def require_env(key: str) -> str:
-    value = os.getenv(key)
+    value = _get(key)
     if not value:
         raise RuntimeError(
-            f"Variable d'environnement manquante : {key}. "
-            "Copie .env.example en .env et remplis-la."
+            f"Configuration manquante : {key}. "
+            "En local : copie .env.example en .env et remplis-la. "
+            "Sur Streamlit Cloud : ajoute-la dans les Secrets de l'app."
         )
     return value
 
 
 # --- Pinecone ---
 def pinecone_index_name() -> str:
-    return os.getenv("PINECONE_INDEX", "dictionnaire-vivant-tome1")
+    return _get("PINECONE_INDEX", "dictionnaire-vivant-tome1")
 
 
 def pinecone_namespace() -> str:
     """Namespace où vivent nos vecteurs (isole le Tome 1 dans un index partagé)."""
-    return os.getenv("PINECONE_NAMESPACE", "tome1")
+    return _get("PINECONE_NAMESPACE", "tome1")
 
 
 def pinecone_cloud() -> str:
-    return os.getenv("PINECONE_CLOUD", "aws")
+    return _get("PINECONE_CLOUD", "aws")
 
 
 def pinecone_region() -> str:
-    return os.getenv("PINECONE_REGION", "us-east-1")
+    return _get("PINECONE_REGION", "us-east-1")
