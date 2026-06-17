@@ -40,7 +40,10 @@ dans `.env` (`mistral` | `openai` | `cohere`) sans toucher au code.
 ## Utilisation
 
 ```bash
-# 0. Menu interactif (le plus simple — tape une phrase, reçois la fiche)
+# 0a. Interface web (la plus agréable — 3 onglets : recherche, point origine, explorer)
+streamlit run web.py
+
+# 0b. Menu interactif en terminal (tape une phrase, reçois la fiche)
 python src/app.py
 
 # 1. Vérifier la lecture des fiches (aucune clé requise)
@@ -62,7 +65,8 @@ python src/geometry.py 051          # analyse détaillée d'une fiche (Yin/Yang�
 
 | Fichier            | Rôle                                                       |
 |--------------------|------------------------------------------------------------|
-| `src/app.py`       | **Menu interactif** : phrase → fiche + punchlines          |
+| `web.py`           | **Interface web Streamlit** (recherche · origine · explorer)|
+| `src/app.py`       | Menu interactif en terminal : phrase → fiche + punchlines   |
 | `src/config.py`    | Config + choix du modèle via `.env`                        |
 | `src/parser.py`    | `tome1_social_table.md` → objets `Fiche`                   |
 | `src/embeddings.py`| Couche agnostique Mistral / OpenAI / Cohere                |
