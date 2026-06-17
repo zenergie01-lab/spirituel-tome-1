@@ -40,7 +40,7 @@ dans `.env` (`mistral` | `openai` | `cohere`) sans toucher au code.
 ## Utilisation
 
 ```bash
-# 0a. Interface web (la plus agréable — 3 onglets : recherche, point origine, explorer)
+# 0a. Interface web (4 onglets : recherche · point origine · explorer · ajouter un mot)
 streamlit run web.py
 
 # 0b. Menu interactif en terminal (tape une phrase, reçois la fiche)
@@ -59,13 +59,27 @@ python src/search.py "trop de vitesse" --role E --domaine "Temps & Rythme"
 # 4. Analyser la géométrie
 python src/geometry.py              # point origine + dualités les plus complémentaires
 python src/geometry.py 051          # analyse détaillée d'une fiche (Yin/Yang→Tao)
+
+# 5. Générer une fiche à partir d'un mot (Mistral) — sans l'enregistrer
+python src/generate.py "Orgueil"
 ```
+
+## Ajouter un mot (le dictionnaire grandit)
+
+L'onglet **« ➕ Ajouter un mot »** de l'app web : tu tapes un mot, Mistral génère
+le pôle opposé, l'équilibre, le domaine, la présentation et 3 punchlines dans le
+style du Tome 1. Tu prévisualises, puis **Enregistrer** ajoute la fiche à Pinecone.
+
+Les mots ajoutés rejoignent les 51 originaux **partout** : recherche, Explorer et
+calcul du point origine. Ils sont stockés dans **Pinecone** (pas dans le `.md`),
+ce qui les rend persistants même sur Streamlit Cloud (filesystem éphémère).
 
 ## Structure
 
 | Fichier            | Rôle                                                       |
 |--------------------|------------------------------------------------------------|
-| `web.py`           | **Interface web Streamlit** (recherche · origine · explorer)|
+| `web.py`           | **Interface web Streamlit** (recherche · origine · explorer · ajouter)|
+| `src/generate.py`  | Génère une fiche complète à partir d'un mot (Mistral chat)  |
 | `src/app.py`       | Menu interactif en terminal : phrase → fiche + punchlines   |
 | `src/config.py`    | Config + choix du modèle via `.env`                        |
 | `src/parser.py`    | `tome1_social_table.md` → objets `Fiche`                   |

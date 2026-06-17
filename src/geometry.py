@@ -44,12 +44,40 @@ def _index():
     return pc.Index(config.pinecone_index_name())
 
 
+def _all_fiche_ids() -> List[str]:
+    """IDs de fiches = union du .md (canonique) et de Pinecone (nouveaux mots)."""
+    from ingest import list_fiche_ids
+
+    md_ids = [f.id for f in parse()]
+    try:
+        pc_ids = list_fiche_ids()
+    except Exception:
+        pc_ids = []
+    return sorted(set(md_ids) | set(pc_ids))
+
+
+def _titres() -> Dict[str, str]:
+    """Map fiche_id → titre, pour le .md ET les fiches ajoutées via Pinecone."""
+    from ingest import fiche_from_pinecone
+
+    titres = {f.id: f.titre for f in parse()}
+    for fid in _all_fiche_ids():
+        if fid not in titres:
+            f = fiche_from_pinecone(fid)
+            if f:
+                titres[fid] = f.titre
+    return titres
+
+
 def load_vectors() -> Dict[str, np.ndarray]:
-    """Récupère tous les vecteurs (A/B/E de chaque fiche) depuis Pinecone."""
-    fiches = parse()
+    """Récupère tous les vecteurs (A/B/E de chaque fiche) depuis Pinecone.
+
+    Inclut les fiches ajoutées via l'app (présentes dans Pinecone mais pas
+    dans le .md), pour qu'elles comptent dans le point origine.
+    """
     ids: List[str] = []
-    for f in fiches:
-        ids += [f"{f.id}#A", f"{f.id}#B", f"{f.id}#E"]
+    for fid in _all_fiche_ids():
+        ids += [f"{fid}#A", f"{fid}#B", f"{fid}#E"]
 
     index = _index()
     namespace = config.pinecone_namespace()
@@ -103,10 +131,10 @@ def analyze_duality(fiche_id: str, vectors: Dict[str, np.ndarray]) -> DualityRep
     else:
         biais = f"penche vers le pôle B ({proj:.2f})"
 
-    fiche = next(f for f in parse() if f.id == fiche_id)
+    titre = _titres().get(fiche_id, fiche_id)
     return DualityReport(
         fiche_id=fiche_id,
-        titre=fiche.titre,
+        titre=titre,
         tension=tension,
         eq_projection=proj,
         biais=biais,
@@ -120,14 +148,14 @@ def equilibres_centres(
 
     |projection| proche de 0 = équilibre parfaitement centré entre les pôles.
     """
-    fiches = {f.id: f.titre for f in parse()}
+    fiches = _titres()
     reports = []
     for fid in fiches:
         try:
             r = analyze_duality(fid, vectors)
         except KeyError:
             continue
-        reports.append((f"[{fid}] {r.titre}", r.eq_projection))
+        reports.append((f"[{fid}] {fiches[fid]}", r.eq_projection))
     reports.sort(key=lambda x: abs(x[1]))  # les plus centrés d'abord
     return reports[:top_k]
 
@@ -151,14 +179,17 @@ def closest_to_origine(
     figurer) remontent en tête.
     """
     origine = point_origine(vectors)
-    fiches = {f.id: f.titre for f in parse()}
+    fiches = _titres()
     scored = [
-        (vid[:3], cosine(v, origine))
+        (vid.split("#", 1)[0], cosine(v, origine))
         for vid, v in vectors.items()
         if vid.endswith("#E")
     ]
     scored.sort(key=lambda x: x[1], reverse=True)
-    return [(f"[{fid}] {fiches[fid]}", score) for fid, score in scored[:top_k]]
+    return [
+        (f"[{fid}] {fiches.get(fid, fid)}", score)
+        for fid, score in scored[:top_k]
+    ]
 
 
 # ─────────────────────────────────── CLI ──────────────────────────────────────

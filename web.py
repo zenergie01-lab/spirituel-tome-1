@@ -24,7 +24,19 @@ ROLE_FR = {"A": "Pôle A", "B": "Pôle B", "E": "Équilibre"}
 # ── Données et ressources mises en cache (chargées une seule fois) ──────────────
 @st.cache_data(show_spinner=False)
 def load_fiches() -> dict[str, Fiche]:
-    return {f.id: f for f in parse()}
+    """Les 51 fiches du .md + les mots ajoutés (présents dans Pinecone seulement)."""
+    fiches = {f.id: f for f in parse()}
+    try:
+        from ingest import fiche_from_pinecone, list_fiche_ids
+
+        for fid in list_fiche_ids():
+            if fid not in fiches:
+                f = fiche_from_pinecone(fid)
+                if f:
+                    fiches[fid] = f
+    except Exception:
+        pass  # hors-ligne / Pinecone indisponible → on garde au moins le .md
+    return dict(sorted(fiches.items()))
 
 
 @st.cache_data(show_spinner="Recherche en cours…")
@@ -112,11 +124,66 @@ def page_origine() -> None:
 
 
 def page_explorer(fiches: dict[str, Fiche]) -> None:
-    st.subheader("Explorer les 51 fiches")
+    st.subheader(f"Explorer les {len(fiches)} fiches")
     options = [f"{f.id} — {f.pole_a} ⇄ {f.pole_b} → {f.equilibre}" for f in fiches.values()]
     choix = st.selectbox("Choisis une dualité", options)
     fiche = fiches[choix[:3]]
     render_fiche(fiche)
+
+
+def page_ajouter_mot(fiches: dict[str, Fiche]) -> None:
+    st.subheader("Ajouter un mot au dictionnaire")
+    st.write(
+        "Écris **un mot**. L'IA trouve son pôle opposé, son point d'équilibre, "
+        "et rédige la fiche dans le style du Tome 1. Tu valides avant d'enregistrer."
+    )
+
+    mot = st.text_input("Le mot", placeholder="ex. Orgueil", key="mot_ajout")
+
+    if st.button("✨ Générer la fiche", type="primary") and mot.strip():
+        from generate import generate_fiche
+
+        with st.spinner("Génération en cours…"):
+            try:
+                st.session_state["fiche_generee"] = generate_fiche(mot.strip())
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Échec de la génération : {e}")
+
+    fiche = st.session_state.get("fiche_generee")
+    if fiche is None:
+        return
+
+    st.divider()
+    st.caption("Aperçu — rien n'est encore enregistré.")
+    render_fiche(fiche)
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Régénérer"):
+            from generate import generate_fiche
+
+            with st.spinner("Nouvelle version…"):
+                try:
+                    st.session_state["fiche_generee"] = generate_fiche(fiche.pole_a)
+                    st.rerun()
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Échec : {e}")
+    with col2:
+        if st.button("💾 Enregistrer dans le dictionnaire", type="primary"):
+            from ingest import next_fiche_id, upsert_fiche
+
+            with st.spinner("Enregistrement dans Pinecone…"):
+                try:
+                    fiche.id = next_fiche_id(list(fiches.keys()))
+                    upsert_fiche(fiche)
+                    load_fiches.clear()  # rafraîchit Recherche/Explorer/Origine
+                    st.session_state.pop("fiche_generee", None)
+                    st.success(
+                        f"« {fiche.pole_a} ⇄ {fiche.pole_b} → {fiche.equilibre} » "
+                        f"ajouté (fiche {fiche.id}). Il apparaît maintenant partout. 🌱"
+                    )
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Échec de l'enregistrement : {e}")
 
 
 # ── App ─────────────────────────────────────────────────────────────────────────
@@ -126,13 +193,17 @@ def main() -> None:
     st.caption("Entre deux pôles opposés, trouve ton point d'équilibre.")
 
     fiches = load_fiches()
-    tab1, tab2, tab3 = st.tabs(["🔍 Recherche", "☯️ Point origine", "📖 Explorer"])
+    tab1, tab2, tab3, tab4 = st.tabs(
+        ["🔍 Recherche", "☯️ Point origine", "📖 Explorer", "➕ Ajouter un mot"]
+    )
     with tab1:
         page_recherche(fiches)
     with tab2:
         page_origine()
     with tab3:
         page_explorer(fiches)
+    with tab4:
+        page_ajouter_mot(fiches)
 
 
 main()

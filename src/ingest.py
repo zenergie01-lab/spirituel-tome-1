@@ -25,6 +25,11 @@ def _client() -> Pinecone:
     return Pinecone(api_key=config.require_env("PINECONE_API_KEY"))
 
 
+def _open_index():
+    """Ouvre l'index existant (ne le crée pas) — pour lecture/append rapide."""
+    return _client().Index(config.pinecone_index_name())
+
+
 def ensure_index(pc: Pinecone, dimension: int) -> str:
     name = config.pinecone_index_name()
     existing = {ix["name"] for ix in pc.list_indexes()}
@@ -65,6 +70,11 @@ def _build_records(fiches: List[Fiche]) -> List[Dict]:
             "equilibre": f.equilibre,
             "domaine": f.domaine,
             "titre": f.titre,
+            # Présentation + punchlines stockées en metadata : permet de
+            # reconstruire une fiche entièrement depuis Pinecone (utile pour
+            # les nouveaux mots qui ne sont pas dans le .md).
+            "presentation": f.presentation,
+            "punchlines": [p for p in f.punchlines if p.strip()],
         }
         records.append(
             {"id": f"{f.id}#A", "text": f.pole_a_text(),
@@ -113,6 +123,76 @@ def ingest() -> None:
         ns_count.get("vector_count") if isinstance(ns_count, dict) else None
     )
     print(f"Terminé. Vecteurs dans le namespace '{namespace}' : {count}")
+
+
+# ─────────────────── Append / lecture d'une seule fiche ───────────────────────
+def upsert_fiche(fiche: Fiche) -> None:
+    """Ajoute (ou remplace) une seule fiche dans Pinecone : 3 vecteurs.
+
+    Réutilise _build_records() et embed(). Idempotent grâce à l'upsert : si l'id
+    existe déjà, les vecteurs sont écrasés ; sinon ils sont ajoutés.
+    """
+    spec = config.get_provider()
+    records = _build_records([fiche])
+    vectors = embed([r["text"] for r in records], input_type="search_document")
+
+    pc = _client()
+    index = pc.Index(ensure_index(pc, spec.dimension))
+    payload = [
+        {"id": r["id"], "values": v, "metadata": {**r["meta"], "text": r["text"]}}
+        for r, v in zip(records, vectors)
+    ]
+    index.upsert(vectors=payload, namespace=config.pinecone_namespace())
+
+
+def list_fiche_ids() -> List[str]:
+    """Tous les fiche_id distincts présents dans le namespace Pinecone.
+
+    Pinecone pagine les ids ; chaque fiche a 3 vecteurs (#A/#B/#E) → on retire
+    le suffixe et on déduplique.
+    """
+    index = _open_index()
+    namespace = config.pinecone_namespace()
+    ids: set[str] = set()
+    for page in index.list(namespace=namespace):
+        # Chaque page est un ListResponse avec .vectors = [ListItem(id=...), …].
+        # Selon la version du SDK, on peut aussi recevoir directement une liste.
+        items = getattr(page, "vectors", page)
+        for item in items:
+            vid = getattr(item, "id", item)  # ListItem → .id, sinon str brut
+            ids.add(str(vid).split("#", 1)[0])
+    return sorted(ids)
+
+
+def fiche_from_pinecone(fiche_id: str) -> Fiche | None:
+    """Reconstruit une Fiche depuis ses métadonnées Pinecone (#A/#B/#E)."""
+    index = _open_index()
+    namespace = config.pinecone_namespace()
+    res = index.fetch(
+        ids=[f"{fiche_id}#A", f"{fiche_id}#B", f"{fiche_id}#E"], namespace=namespace
+    )
+    vectors = res.vectors
+    rec = vectors.get(f"{fiche_id}#E") or next(iter(vectors.values()), None)
+    if rec is None:
+        return None
+    m = rec.metadata or {}
+    punch = list(m.get("punchlines", []))
+    punch += [""] * (3 - len(punch))
+    return Fiche(
+        id=fiche_id,
+        pole_a=str(m.get("pole_a", "")),
+        pole_b=str(m.get("pole_b", "")),
+        equilibre=str(m.get("equilibre", "")),
+        domaine=str(m.get("domaine", "")),
+        presentation=str(m.get("presentation", "")),
+        punchlines=[str(p) for p in punch[:3]],
+    )
+
+
+def next_fiche_id(known_ids: List[str]) -> str:
+    """Prochain id libre (max + 1), formaté sur 3 chiffres comme le parser."""
+    nums = [int(i) for i in known_ids if i.isdigit()]
+    return str((max(nums) + 1) if nums else 1).zfill(3)
 
 
 if __name__ == "__main__":
