@@ -1,0 +1,10 @@
+pinecone>=5.0.0
+python-dotenv>=1.0.0
+numpy>=1.26.0
+
+# Fournisseurs d'embeddings (installe au moins celui que tu utilises)
+# NB: mistralai pinné en v1.x — la v2.x s'installe mal sur Python 3.14
+#     (package sans __init__, l'import `from mistralai import Mistral` casse).
+mistralai>=1.0.0,<2
+openai>=1.0.0
+cohere>=5.0.0
